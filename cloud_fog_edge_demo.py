@@ -1,3 +1,5 @@
+%%writefile cloud_fog_edge_advanced_demo.py
+
 import streamlit as st
 import time
 import random
@@ -107,11 +109,12 @@ def simulate_task(task_id):
             
             # Estimate transmission time (if offloaded from Edge, consider Fog, then Cloud)
             transmission_time = 0.0
-            if layer == "Fog":
+            if layer == "Fog": # If task ends up in Fog but could originate from Edge
+                # Assuming Edge is the origin point for tasks unless specified otherwise
+                # This simple model assumes data needs to travel to Fog
                 transmission_time += task_data_size / NETWORK_BANDWIDTH["Edge_Fog"]
-            elif layer == "Cloud":
-                # Assuming data might go Edge -> Fog -> Cloud, or directly Edge -> Cloud if direct path
-                # For simplicity, let's consider Edge -> Fog -> Cloud for now
+            elif layer == "Cloud": # If task ends up in Cloud
+                # Assuming data travels from Edge -> Fog -> Cloud for simplicity in estimation
                 transmission_time += (task_data_size / NETWORK_BANDWIDTH["Edge_Fog"]) + (task_data_size / NETWORK_BANDWIDTH["Fog_Cloud"])
             
             # Estimate queue time (very basic, assuming current queue processes instantly)
@@ -153,12 +156,12 @@ def simulate_task(task_id):
 
     # Calculate transmission time (if offloaded, which is simulated here by layer choice)
     transmission_time = 0.0
-    if final_layer == "Fog" and original_assigned_layer == "Edge": # If task originated at Edge but got to Fog
-         transmission_time = task_data_size / NETWORK_BANDWIDTH["Edge_Fog"]
-         offloaded = True
-    elif final_layer == "Cloud": # If task reached Cloud
+    # Assuming initial task generation is always at the "Edge" level for transmission calculation purposes
+    if final_layer == "Fog":
+        transmission_time = task_data_size / NETWORK_BANDWIDTH["Edge_Fog"]
+        if original_assigned_layer == "Edge" and final_layer == "Fog": offloaded = True
+    elif final_layer == "Cloud":
         if original_assigned_layer == "Edge":
-            # If from Edge, assume Edge -> Fog -> Cloud path for data
             transmission_time = (task_data_size / NETWORK_BANDWIDTH["Edge_Fog"]) + (task_data_size / NETWORK_BANDWIDTH["Fog_Cloud"])
             offloaded = True
         elif original_assigned_layer == "Fog":
@@ -193,7 +196,7 @@ def simulate_task(task_id):
         "Timestamp": time.strftime("%H:%M:%S")
     })
 
-    return final_layer, total_latency, task_load, offloaded, queue_time
+    return final_layer, total_latency, task_load, task_data_size, offloaded, queue_time # RETURN task_data_size here
 
 # --- UI Layout ---
 st.write("---") # Separator
@@ -208,7 +211,8 @@ with col1:
     if st.button("🚀 Generate Task"):
         task_id = len(st.session_state.task_log) + 1
         with st.spinner(f"Processing Task-{task_id}..."):
-            layer, latency, task_load, offloaded, queue_time = simulate_task(task_id)
+            # Capture task_data_size here
+            layer, latency, task_load, task_data_size, offloaded, queue_time = simulate_task(task_id) 
         
         offload_msg = "(Offloaded)" if offloaded else ""
         queue_msg = f"(Queued: {queue_time:.2f}s)" if queue_time > 0 else ""
@@ -243,6 +247,12 @@ st.subheader("📊 Task Summary & Performance")
 summary_data = []
 for k, v in st.session_state.results.items():
     if v:
+        # Filter task_log for tasks processed by the current layer k
+        tasks_for_layer = [t for t in st.session_state.task_log if t['Final Layer'] == k]
+        
+        # Safely convert 'Task Load' strings to float for sum
+        total_load_processed = sum(float(t['Task Load']) for t in tasks_for_layer) if tasks_for_layer else 0.0
+
         summary_data.append({
             "Layer": k,
             "Total Tasks": len(v),
@@ -250,7 +260,7 @@ for k, v in st.session_state.results.items():
             "Min Latency (sec)": f"{min(v):.2f}",
             "Max Latency (sec)": f"{max(v):.2f}",
             "Std Dev Latency (sec)": f"{np.std(v):.2f}" if len(v) > 1 else "N/A", # Use np.std for std dev
-            "Total Load Processed": f"{sum(float(t['Task Load']) for t in st.session_state.task_log if t['Final Layer'] == k):.2f}"
+            "Total Load Processed": f"{total_load_processed:.2f}"
         })
     else:
         summary_data.append({
@@ -269,7 +279,9 @@ fig, ax = plt.subplots(figsize=(10, 5))
 avg_latency_vals = {k: (sum(v) / len(v)) if v else 0 for k, v in st.session_state.results.items()}
 ax.bar(avg_latency_vals.keys(), avg_latency_vals.values(), color=["green", "orange", "blue"])
 ax.set_ylabel("Avg Latency (sec)")
-ax.set_ylim(0, max(1.5, max(avg_latency_vals.values()) * 1.1 if avg_latency_vals else 0.1)) # Dynamic y-limit
+# Dynamic y-limit, ensuring it doesn't go below a reasonable minimum
+max_avg_val = max(avg_latency_vals.values()) if avg_latency_vals else 0.1
+ax.set_ylim(0, max(0.2, max_avg_val * 1.1)) 
 ax.grid(axis='y', linestyle='--', alpha=0.7)
 st.pyplot(fig)
 
@@ -285,7 +297,7 @@ if any(len(v) > 0 for v in st.session_state.historical_avg_latency.values()):
         historical_df_data[layer] = padded_data
 
     df_historical_avg = pd.DataFrame(historical_df_data)
-    df_historical_avg.index.name = "Task # (Cumulative)"
+    df_historical_avg.index.name = "Task # (Cumulative for each layer)" # Clarify index
     st.line_chart(df_historical_avg)
 else:
     st.info("Generate some tasks to see the historical average latency trend.")
@@ -300,4 +312,4 @@ else:
     st.info("No tasks have been processed yet.")
 
 st.write("---")
-st.markdown("Developed by Your Name/Team Name") # Optional: Add your name here!
+st.markdown("Developed with Streamlit for Cloud-Fog-Edge Simulation") # You can customize this
