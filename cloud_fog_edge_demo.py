@@ -1,4 +1,3 @@
-%%writefile cloud_fog_edge_advanced_demo.py
 import streamlit as st
 import time
 import random
